@@ -1,0 +1,48 @@
+#!/bin/bash
+
+set -e
+
+case $1 in
+  "base")
+    IMAGE_TYPE="Base"
+    ;;
+  "atomic")
+    IMAGE_TYPE="Atomic"
+    ;;
+  *)
+    echo "Invalid image type. Specify \"base\" or \"atomic\""
+    exit 1
+esac
+
+FEDORA_VERSION=23
+FEDORA_IMAGES_URL="https://dl.fedoraproject.org/pub/alt/atomic/stable/Cloud-Images/x86_64/Images"
+CURRENT_SHA256_URL="$FEDORA_IMAGES_URL/Fedora-Cloud-Images-x86_64-${FEDORA_VERSION}-CHECKSUM"
+
+IMAGE_FILE_SUFFIX=".x86_64.raw.xz"
+IMAGE_NAME_PATTERN="Fedora-Cloud-${IMAGE_TYPE}.*${IMAGE_FILE_SUFFIX}"
+
+curl -s -L $CURRENT_SHA256_URL | grep -P $IMAGE_NAME_PATTERN > SHA256SUM
+IMAGE_FILENAME=$(grep -Po $IMAGE_NAME_PATTERN SHA256SUM)
+IMAGE_NAME=$(basename -s $IMAGE_FILE_SUFFIX $IMAGE_FILENAME)
+echo "Latest image is: $IMAGE_NAME"
+
+
+# Verify image integrity
+if [[ ! $(sh -c 'sha256sum -c SHA256SUM > /dev/null; echo $?') == 0 ]]; then
+  echo "Get current image"
+  curl -# -O -- "$FEDORA_IMAGES_URL/$IMAGE_FILENAME"
+  sha256sum -c SHA256SUM
+else
+  echo "Already have current image"
+fi
+
+unxz -k $IMAGE_FILENAME || true
+glance --os-image-api-version 1 image-create \
+  --name $IMAGE_NAME \
+  --file $(basename -s .xz $IMAGE_FILENAME) \
+  --progress \
+  --container-format bare \
+  --disk-format raw \
+  --min-disk 5 \
+  --is-public True
+rm -f $(basename -s .xz $IMAGE_FILENAME)
