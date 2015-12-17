@@ -1,5 +1,6 @@
 #cloud-config
-
+mounts:
+  - [ ephemeral0, /var/lib/docker/volumes, auto, "defaults,nofail,x-systemd.device-timeout=2", 0, 2 ]
 write_files:
   - path: /etc/sysconfig/docker
     permissions: '0644'
@@ -59,6 +60,8 @@ write_files:
       /opt/create_docker_tls_certs.sh
       echo "export DOCKER_HOST=tcp://127.0.0.1:2376 DOCKER_TLS_VERIFY=1" >> ~fedora/.bashrc
       sudo systemctl enable dit4c-deploy-compute
+      sudo docker-storage-setup
+      sudo lvextend -l 100%FREE atomicos/docker-pool
   - path: /etc/systemd/system/dit4c-deploy-compute.service
     permissions: '0644'
     content: |
