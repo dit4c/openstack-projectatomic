@@ -61,7 +61,7 @@ write_files:
       echo "export DOCKER_HOST=tcp://127.0.0.1:2376 DOCKER_TLS_VERIFY=1" >> ~fedora/.bashrc
       sudo systemctl enable dit4c-deploy-compute
       sudo docker-storage-setup
-      sudo lvextend -l 100%FREE atomicos/docker-pool
+      sudo lvextend -l +100%FREE atomicos/docker-pool
   - path: /etc/systemd/system/dit4c-deploy-compute.service
     permissions: '0644'
     content: |
