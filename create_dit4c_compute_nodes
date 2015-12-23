@@ -1,0 +1,79 @@
+#!/bin/bash
+
+set -ex
+
+# Trim whitespace off a string
+trim() {
+  tr -d '[[:space:]]'
+}
+
+# Utility function for parsing OpenStack CLI tool table output to get a value.
+# $1 -> key to lookup
+# eg. value_from_table 'id'
+value_from_table() {
+  grep ' '$1 | cut -d '|' -f 3 | trim
+}
+
+# Waiting for volume creations is pretty common
+wait_for_volume_to_be_available() {
+  set +x
+  V_ID=$1
+  declare REPEAT_ECHO
+  until cinder list | grep $V_ID | grep -q available; do
+    if [[ -z $REPEAT_ECHO ]]; then
+      # Echo a message on first try
+      echo -n "Volume $V_ID not available. Waiting..."
+      REPEAT_ECHO=1
+    else
+      # Add another dot for each retry
+      echo -n "."
+    fi
+    # Fast enough that it doesn't delay too much for quick ops, but slow enough
+    # that a 20 minute wait is displayed in only 6 lines.
+    sleep 5
+  done
+  echo ""
+  set -x
+}
+
+PREFIX=$1
+NUM=${2:-1}
+COMPUTE_FLAVOR=${3:-m2.small}
+VOLSIZE=${4:-50}
+IMAGE_ID=$(glance image-list | grep "Fedora-Cloud-Atomic" | tail -1 | cut -d "|" -f 2 | trim)
+COMPUTE_AZ=${COMPUTE_AZ:-melbourne-qh2-uom}
+VOLUME_AZ=${VOLUME_AZ:-melbourne-qh2}
+SSH_KEY=${SSH_KEY:-DIT4C}
+
+echo "Using image:"
+glance image-show $IMAGE_ID
+IMAGE_NAME=$(glance image-show $IMAGE_ID | value_from_table 'name')
+# Get byte size of image, then round up to nearest GBn
+declare BASE_VOLUME_ID
+if cinder list | grep -q $IMAGE_NAME; then
+  echo "volume exists"
+  BASE_VOLUME_ID=$(cinder show $IMAGE_NAME | value_from_table 'id')
+else
+  echo "volume needs to be created"
+  BASE_VOLUME_ID=$(cinder create --name $IMAGE_NAME --image-id $IMAGE_ID --availability-zone $VOLUME_AZ $IMAGE_SIZE | value_from_table 'id')
+fi
+
+# Wait for volume to become available
+wait_for_volume_to_be_available $BASE_VOLUME_ID
+
+HINTS=""
+for i in $(eval echo {1..$NUM})
+do
+  CN_NAME=$(printf "%s-%02d" $(echo $PREFIX | tr '[:upper:]' '[:lower:]') $i)
+  echo $CN_NAME
+  # Cinder volume creation
+  VOLUME_ID=$(cinder create --name $CN_NAME --availability-zone $VOLUME_AZ --source-volid $BASE_VOLUME_ID $VOLSIZE | value_from_table 'id')
+  wait_for_volume_to_be_available $VOLUME_ID
+  # Nova instance creation
+  INSTANCE_ID=$(nova boot --flavor $COMPUTE_FLAVOR --block-device source=volume,dest=volume,id=$VOLUME_ID,shutdown=remove,bootindex=0 \
+    --availability-zone $COMPUTE_AZ --security-group resbaz-compute-nodes \
+    --key-name $SSH_KEY \
+    --user-data dit4c-compute-cloudinit.yaml $HINTS \
+    --poll $CN_NAME | value_from_table 'id')
+  HINTS="$HINTS --hint different_host=$INSTANCE_ID"
+done
