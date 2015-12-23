@@ -62,6 +62,7 @@ write_files:
       sudo systemctl enable dit4c-deploy-compute
       sudo docker-storage-setup
       sudo lvextend -l +100%FREE atomicos/docker-pool
+      sudo sed -i -e 's/^DOCKER_STORAGE_OPTIONS.*$/\0 --storage-opt dm.basesize=5GB/' /etc/sysconfig/docker-storage
   - path: /etc/systemd/system/dit4c-deploy-compute.service
     permissions: '0644'
     content: |
