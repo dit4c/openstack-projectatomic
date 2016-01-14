@@ -61,6 +61,7 @@ write_files:
       echo "export DOCKER_HOST=tcp://127.0.0.1:2376 DOCKER_TLS_VERIFY=1" >> ~fedora/.bashrc
       sudo systemctl enable dit4c-deploy-compute
       sudo docker-storage-setup
+      sudo lvextend -L 10G --resizefs atomicos/root
       sudo lvextend -l +100%FREE atomicos/docker-pool
       sudo sed -i -e 's/^DOCKER_STORAGE_OPTIONS.*$/\0 --storage-opt dm.basesize=5GB/' /etc/sysconfig/docker-storage
   - path: /etc/systemd/system/dit4c-deploy-compute.service
@@ -84,4 +85,4 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 runcmd:
-  - su fedora -l -c "cd /tmp; /opt/docker-setup.sh; sudo reboot --force --no-wall"
+  - su fedora -l -c "cd /tmp; /opt/docker-setup.sh; sudo atomic host upgrade; sudo reboot --force --no-wall"
