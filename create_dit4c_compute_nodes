@@ -48,6 +48,7 @@ SSH_KEY=${SSH_KEY:-DIT4C}
 echo "Using image:"
 glance image-show $IMAGE_ID
 IMAGE_NAME=$(glance image-show $IMAGE_ID | value_from_table 'name')
+let "IMAGE_SIZE=$(glance image-show $IMAGE_ID | value_from_table 'size') / 2**30 + 1"
 # Get byte size of image, then round up to nearest GBn
 declare BASE_VOLUME_ID
 if cinder list | grep -q $IMAGE_NAME; then
