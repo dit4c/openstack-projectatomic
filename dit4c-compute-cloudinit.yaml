@@ -59,11 +59,27 @@ write_files:
       set -ex
       /opt/create_docker_tls_certs.sh
       echo "export DOCKER_HOST=tcp://127.0.0.1:2376 DOCKER_TLS_VERIFY=1" >> ~fedora/.bashrc
+      sudo systemctl enable entropy-source
       sudo systemctl enable dit4c-deploy-compute
       sudo docker-storage-setup
       sudo lvextend -L 10G --resizefs atomicos/root
       sudo lvextend -l +100%FREE atomicos/docker-pool
       sudo sed -i -e 's/^DOCKER_STORAGE_OPTIONS.*$/\0 --storage-opt dm.basesize=5GB/' /etc/sysconfig/docker-storage
+  - path: /etc/systemd/system/entropy-source.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Provide entropy source via haveged
+      Requires=docker.service
+      After=docker.service
+      [Service]
+      Environment=DOCKER_TLS_VERIFY=1
+      Environment=DOCKER_HOST=tcp://127.0.0.1:2376
+      Environment=DOCKER_CERT_PATH=/home/fedora/.docker
+      ExecStartPre=-/usr/bin/docker rm -f entropy_source
+      ExecStart=/usr/bin/docker run -i --name entropy_source --rm --net=none --cap-add SYS_ADMIN docker.io/dit4c/haveged
+      [Install]
+      WantedBy=multi-user.target
   - path: /etc/systemd/system/dit4c-deploy-compute.service
     permissions: '0644'
     content: |
