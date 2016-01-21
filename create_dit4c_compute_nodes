@@ -44,6 +44,7 @@ IMAGE_ID=$(glance image-list | grep "Fedora-Cloud-Atomic" | tail -1 | cut -d "|"
 COMPUTE_AZ=${COMPUTE_AZ:-melbourne-qh2-uom}
 VOLUME_AZ=${VOLUME_AZ:-melbourne-qh2}
 SSH_KEY=${SSH_KEY:-DIT4C}
+START_NUM=${START_NUM:-1}
 
 echo "Using image:"
 glance image-show $IMAGE_ID
@@ -66,7 +67,7 @@ wait_for_volume_to_be_available $BASE_VOLUME_ID
 cinder readonly-mode-update $BASE_VOLUME_ID True
 
 HINTS=""
-for i in $(eval echo {1..$NUM})
+for i in $(eval echo {$START_NUM..$NUM})
 do
   CN_NAME=$(printf "%s-%02d" $(echo $PREFIX | tr '[:upper:]' '[:lower:]') $i)
   echo $CN_NAME
