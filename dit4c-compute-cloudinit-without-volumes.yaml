@@ -1,0 +1,124 @@
+#cloud-config
+write_files:
+  - path: /etc/sysconfig/docker
+    permissions: '0644'
+    content: |
+      # /etc/sysconfig/docker
+      OPTIONS='--selinux-enabled --log-driver=journald --icc=false --tlsverify --tlscacert=/etc/docker/ca.pem --tlscert=/etc/docker/server-cert.pem --tlskey=/etc/docker/server-key.pem -H=tcp://0.0.0.0:2376'
+      DOCKER_CERT_PATH=/etc/docker
+  - path: /opt/create_docker_tls_certs.sh
+    permissions: '0555'
+    content: |
+      #!/bin/bash
+      set -ex
+
+      # Based on Sven's rundown here:
+      # https://docs.docker.com/engine/articles/https/
+
+      HOST=$(hostname)
+
+      # Generate CA key/cert
+      openssl genrsa -out ca-key.pem 4096
+      openssl req -new -x509 -days 3650 -subj "/CN=$HOST" \
+        -key ca-key.pem -sha256 -out ca.pem
+      chmod 0400 ca-key.pem
+      chmod 0444 ca.pem
+
+      # Generate server key/cert
+      openssl genrsa -out server-key.pem 4096
+      openssl req -subj "/CN=$HOST" -sha256 -new -key server-key.pem -out server.csr
+      echo subjectAltName = IP:172.18.0.1,IP:127.0.0.1 > extfile.cnf
+      openssl x509 -req -days 3650 -sha256 -in server.csr \
+        -CA ca.pem -CAkey ca-key.pem -CAcreateserial \
+        -out server-cert.pem -extfile extfile.cnf
+      chmod 0400 server-key.pem
+      chmod 0444 server-cert.pem
+
+      # Generate client key/cert
+      openssl genrsa -out key.pem 4096
+      openssl req -subj '/CN=client' -new -key key.pem -out client.csr
+      openssl x509 -req -days 3650 -sha256 -in client.csr \
+        -CA ca.pem -CAkey ca-key.pem -CAcreateserial \
+        -out cert.pem -extfile extfile.cnf
+      chmod 0444 key.pem
+      chmod 0444 cert.pem
+
+      # Move client files to the right directory
+      mkdir -p $HOME/.docker
+      mv key.pem cert.pem $HOME/.docker
+      cp ca.pem $HOME/.docker
+      # Move server files to /etc/docker
+      sudo chown root:root ca-key.pem ca.pem ca.srl server-key.pem server-cert.pem
+      sudo mv ca-key.pem ca.pem ca.srl server-key.pem server-cert.pem /etc/docker
+  - path: /opt/docker-setup.sh
+    permissions: '0555'
+    content: |
+      #!/bin/bash
+      set -ex
+      /opt/create_docker_tls_certs.sh
+      echo "export DOCKER_HOST=tcp://127.0.0.1:2376 DOCKER_TLS_VERIFY=1" >> ~fedora/.bashrc
+      sudo systemctl enable entropy-source
+      sudo systemctl enable dit4c-deploy-compute
+      EPHEMERAL_DEVICE=$(curl -s http://169.254.169.254/latest/meta-data/block-device-mapping/ephemeral0)
+      if [[ "$EPHEMERAL_DEVICE" == "" ]]; then
+        echo "No ephemeral device detected"
+      else
+        sudo umount $EPHEMERAL_DEVICE || true
+        sudo pvdisplay $EPHEMERAL_DEVICE || sudo pvcreate -f $EPHEMERAL_DEVICE
+        sudo vgextend atomicos $EPHEMERAL_DEVICE
+      fi
+      sudo docker-storage-setup
+      sudo lvextend -L 6G --resizefs atomicos/root
+      sudo lvcreate -l 10%FREE --name docker-volumes atomicos && \
+        sudo mkfs.ext4 /dev/mapper/atomicos-docker--volumes && \
+        sudo systemctl enable var-lib-docker-volumes.mount
+      sudo lvextend -l +100%FREE atomicos/docker-pool
+      sudo sed -i -e 's/^DOCKER_STORAGE_OPTIONS.*$/\0 --storage-opt dm.basesize=5GB/' /etc/sysconfig/docker-storage
+  - path: /etc/systemd/system/var-lib-docker-volumes.mount
+    permissions: '0644'
+    content: |
+      [Unit]
+      Before=docker.service
+      [Mount]
+      What=/dev/mapper/atomicos-docker--volumes
+      Where=/var/lib/docker/volumes
+      Options=defaults,nofail,x-systemd.device-timeout=2
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/entropy-source.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Provide entropy source via haveged
+      Requires=docker.service
+      After=docker.service
+      [Service]
+      Environment=DOCKER_TLS_VERIFY=1
+      Environment=DOCKER_HOST=tcp://127.0.0.1:2376
+      Environment=DOCKER_CERT_PATH=/home/fedora/.docker
+      ExecStartPre=-/usr/bin/docker rm -f entropy_source
+      ExecStart=/usr/bin/docker run -i --name entropy_source --rm --net=none --cap-add SYS_ADMIN docker.io/dit4c/haveged
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/dit4c-deploy-compute.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Setup compute node
+      Requires=docker.service
+      After=docker.service
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      Environment=DOCKER_TLS_VERIFY=1
+      Environment=DOCKER_HOST=tcp://127.0.0.1:2376
+      Environment=DOCKER_CERT_PATH=/home/fedora/.docker
+      ExecStartPre=-/usr/bin/docker network create --subnet 172.18.0.0/16 dit4cplatform
+      ExecStartPre=-/usr/bin/mkdir -p /opt/dit4c-machineshop
+      ExecStartPre=-/usr/sbin/iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
+      ExecStartPre=-/usr/sbin/iptables -I FORWARD -p tcp -m state --state NEW -s 172.18.0.0/16 -d 172.17.0.0/16 -j ACCEPT
+      ExecStart=/usr/bin/docker run -i --name dit4c_deploy_compute --rm --net=dit4cplatform -e DOCKER_HOST=tcp://172.18.0.1:2376 -e DOCKER_TLS_VERIFY=1 -e PORTAL_URL=https://resbaz.cloud.edu.au -e DOCKER_CERT_PATH=/opt/docker-certs -v /home/fedora/.docker:/opt/docker-certs:z dit4c/dit4c-deploy-compute
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - su fedora -l -c "cd /tmp; /opt/docker-setup.sh; sudo setenforce 0; sudo atomic host upgrade; sudo reboot --force --no-wall"

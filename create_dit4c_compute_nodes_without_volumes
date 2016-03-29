@@ -1,0 +1,40 @@
+#!/bin/bash
+
+set -ex
+
+# Trim whitespace off a string
+trim() {
+  tr -d '[[:space:]]'
+}
+
+# Utility function for parsing OpenStack CLI tool table output to get a value.
+# $1 -> key to lookup
+# eg. value_from_table 'id'
+value_from_table() {
+  grep ' '$1 | cut -d '|' -f 3 | trim
+}
+
+PREFIX=$1
+NUM=${2:-1}
+COMPUTE_FLAVOR=${3:-m2.small}
+IMAGE_ID=$(glance image-list | grep "Fedora-Cloud-Atomic" | tail -1 | cut -d "|" -f 2 | trim)
+COMPUTE_AZ=${COMPUTE_AZ:-melbourne-qh2-uom}
+SSH_KEY=${SSH_KEY:-DIT4C}
+START_NUM=${START_NUM:-1}
+
+echo "Using image:"
+glance image-show $IMAGE_ID
+
+HINTS=""
+for i in $(eval echo {$START_NUM..$NUM})
+do
+  CN_NAME=$(printf "%s-%02d" $(echo $PREFIX | tr '[:upper:]' '[:lower:]') $i)
+  echo $CN_NAME
+  # Nova instance creation
+  INSTANCE_ID=$(nova boot --flavor $COMPUTE_FLAVOR --image $IMAGE_ID \
+    --availability-zone $COMPUTE_AZ --security-group resbaz-compute-nodes \
+    --key-name $SSH_KEY \
+    --user-data dit4c-compute-cloudinit-without-volumes.yaml $HINTS \
+    --poll $CN_NAME | value_from_table 'id')
+  HINTS="$HINTS --hint different_host=$INSTANCE_ID"
+done
