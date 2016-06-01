@@ -45,6 +45,10 @@ COMPUTE_AZ=${COMPUTE_AZ:-melbourne-qh2-uom}
 VOLUME_AZ=${VOLUME_AZ:-melbourne-qh2}
 SSH_KEY=${SSH_KEY:-DIT4C}
 START_NUM=${START_NUM:-1}
+VOLUME_TYPE_FLAG=""
+if [[ "$VOLUME_TYPE" != "" ]]; then
+  VOLUME_TYPE_FLAG="--volume-type $VOLUME_TYPE"
+fi
 
 echo "Using image:"
 glance image-show $IMAGE_ID
@@ -57,7 +61,7 @@ if cinder list | grep -q $IMAGE_NAME; then
   BASE_VOLUME_ID=$(cinder show $IMAGE_NAME | value_from_table 'id')
 else
   echo "volume needs to be created"
-  BASE_VOLUME_ID=$(cinder create --name $IMAGE_NAME --image-id $IMAGE_ID --availability-zone $VOLUME_AZ $IMAGE_SIZE | value_from_table 'id')
+  BASE_VOLUME_ID=$(cinder create --name $IMAGE_NAME --image-id $IMAGE_ID --availability-zone $VOLUME_AZ $VOLUME_TYPE_FLAG $IMAGE_SIZE | value_from_table 'id')
 fi
 
 # Wait for volume to become available
@@ -72,7 +76,7 @@ do
   CN_NAME=$(printf "%s-%02d" $(echo $PREFIX | tr '[:upper:]' '[:lower:]') $i)
   echo $CN_NAME
   # Cinder volume creation
-  VOLUME_ID=$(cinder create --name $CN_NAME --availability-zone $VOLUME_AZ --source-volid $BASE_VOLUME_ID $VOLSIZE | value_from_table 'id')
+  VOLUME_ID=$(cinder create --name $CN_NAME --availability-zone $VOLUME_AZ --source-volid $BASE_VOLUME_ID $VOLUME_TYPE_FLAG $VOLSIZE | value_from_table 'id')
   wait_for_volume_to_be_available $VOLUME_ID
   # Nova instance creation
   INSTANCE_ID=$(nova boot --flavor $COMPUTE_FLAVOR --block-device source=volume,dest=volume,id=$VOLUME_ID,shutdown=remove,bootindex=0 \

@@ -1,4 +1,6 @@
 #cloud-config
+mounts:
+  - [ ephemeral0, None ]
 write_files:
   - path: /etc/sysconfig/docker
     permissions: '0644'
@@ -63,7 +65,6 @@ write_files:
       if [[ "$EPHEMERAL_DEVICE" == "" ]]; then
         echo "No ephemeral device detected"
       else
-        sudo umount $EPHEMERAL_DEVICE || true
         sudo pvdisplay $EPHEMERAL_DEVICE || sudo pvcreate -f $EPHEMERAL_DEVICE
         sudo vgextend atomicos $EPHEMERAL_DEVICE
       fi
