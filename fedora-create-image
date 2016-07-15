@@ -4,7 +4,7 @@ set -e
 
 case $1 in
   "base")
-    IMAGE_TYPE="Base"
+    IMAGE_TYPE="Cloud-Base"
     ;;
   "atomic")
     IMAGE_TYPE="Atomic"
@@ -14,12 +14,12 @@ case $1 in
     exit 1
 esac
 
-FEDORA_VERSION=23
-FEDORA_IMAGES_URL="https://dl.fedoraproject.org/pub/alt/atomic/stable/Cloud-Images/x86_64/Images"
-CURRENT_SHA256_URL="$FEDORA_IMAGES_URL/Fedora-Cloud-Images-x86_64-${FEDORA_VERSION}-CHECKSUM"
+FEDORA_VERSION=24
+FEDORA_IMAGES_URL="https://dl.fedoraproject.org/pub/alt/atomic/stable/CloudImages/x86_64/images/"
+CURRENT_SHA256_URL=${FEDORA_IMAGES_URL}$(curl -sL $FEDORA_IMAGES_URL | grep -oP "(?<=>)[^<]+-CHECKSUM")
 
 IMAGE_FILE_SUFFIX=".x86_64.raw.xz"
-IMAGE_NAME_PATTERN="Fedora-Cloud-${IMAGE_TYPE}.*${IMAGE_FILE_SUFFIX}"
+IMAGE_NAME_PATTERN="Fedora-${IMAGE_TYPE}-${FEDORA_VERSION}.*${IMAGE_FILE_SUFFIX}"
 
 curl -s -L $CURRENT_SHA256_URL | grep -P $IMAGE_NAME_PATTERN > SHA256SUM
 IMAGE_FILENAME=$(grep -Po $IMAGE_NAME_PATTERN SHA256SUM)
